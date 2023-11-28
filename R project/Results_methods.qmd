@@ -1,0 +1,367 @@
+---
+title: "Egg hormone methods and results"
+author: "Amelia Peardon"
+format:
+  docx:
+    reference-doc: ./template.docx
+editor_options: 
+  chunk_output_type: console
+execute:
+  freeze: auto  # re-render only when source changes
+  cache: false
+  echo: false
+  warning: false
+  error: false
+  include: true
+crossref:
+  fig-title: 'Figure'
+  fig-labels: arabic
+  title-delim: "-"
+  fig-prefix: "Figure"
+  tbl-labels: "Table"
+---
+
+```{r, loading packages and data}
+#| echo: false
+#| include: false
+
+# loading packages
+  pacman::p_load(tidyverse, rptR, lme4, lmerTest, gt, magick, RColorBrewer)
+
+# Set rounding options
+options(digits = 2)
+
+# loading data
+#data <- readxl::read_xlsx("./final_data.xlsx", sheet = "unassayed samples removed 22_4")
+data <- read_csv( "final_data.csv")  
+str(data)
+```
+
+```{r, summary data}
+#| echo: false
+#| include: false
+
+# subsetting by species
+ deli <- data[data$Species == "deli", ]
+guich <- data[data$Species == "guich", ]
+
+# Lets have a look at numbers
+  egg_clutch <- data %>% group_by(Species) %>% summarise(n = n(), clutches = length(unique(ClutchID)))
+
+  eggs_per_clutch <- data %>% group_by(Species, ClutchID) %>% summarise(n = n())
+ eggs_per_clutch_sum <-  eggs_per_clutch %>% group_by(Species) %>% summarise(mean = mean(n), sd = sd(n), min = min(n), max = max(n))
+ 
+ eggs_per_clutch_adj <- data %>% filter(!is.na(final_CORT_pg_mg))%>% group_by(Species, ClutchID) %>% summarise(n = n())
+ eggs_per_clutch_sum_adj <-  eggs_per_clutch_adj %>% group_by(Species) %>% summarise(mean = mean(n), sd = sd(n), min = min(n), max = max(n) )
+ 
+
+ # number of eggs
+ 
+ egg_num <- data %>% group_by(Species) %>% summarise(n = n())
+ 
+ egg_num_adj <- data %>% filter(!is.na(final_CORT_pg_mg)) %>% group_by(Species) %>% summarise(n = n()) # eggs after lost for extraction
+ 
+ ## hormone summary stats
+ 
+ CORT_sum <- data %>% group_by(Species) %>% summarise(mean = mean(log(final_CORT_pg_mg),na.rm =TRUE), sd = sd(log(final_CORT_pg_mg), na.rm =TRUE), min = min(log(final_CORT_pg_mg), na.rm =TRUE), max = max(log(final_CORT_pg_mg), na.rm =TRUE), n =n(), clutches = length(unique(ClutchID)))
+ 
+ TH_sum <- data %>% group_by(Species) %>% summarise(mean = mean(log(final_TH_pg_mg),na.rm =TRUE), sd = sd(log(final_TH_pg_mg), na.rm =TRUE), min = min(log(final_TH_pg_mg), na.rm =TRUE), max = max(log(final_TH_pg_mg), na.rm =TRUE), n =n(), clutches = length(unique(ClutchID, na.rm =TRUE)  ))
+ 
+ 
+CORT_sum_adj <- data %>% group_by(Species) %>% filter(!is.na(final_CORT_pg_mg)) %>% summarise(mean = mean(log(final_CORT_pg_mg),na.rm =TRUE), sd = sd(log(final_CORT_pg_mg), na.rm =TRUE), min = min(log(final_CORT_pg_mg), na.rm =TRUE), max = max(log(final_CORT_pg_mg), na.rm =TRUE), n =n(), clutches = length(unique(ClutchID)))
+
+
+TH_sum_adj <- data %>% group_by(Species) %>% filter(!is.na(final_TH_pg_mg)) %>% summarise(mean = mean(log(final_TH_pg_mg),na.rm =TRUE), sd = sd(log(final_TH_pg_mg), na.rm =TRUE), min = min(log(final_TH_pg_mg), na.rm =TRUE), max = max(log(final_TH_pg_mg), na.rm =TRUE), n =n(), clutches = length(unique(ClutchID, na.rm =TRUE)  ))
+
+ 
+# subsetting by hormone
+
+cort <- data[c("Date", "Time", "Observer", "Species", "SampleID", "EggID", "ClutchID", "Enclosure", "Length_mm", "Width_mm", "Egg_mass_mg", "Yolk_mass_mg", "Dissection_Comments", "Plate_CORT", "CV_CORT", "raw_CORT_pg_ml", "resuspend_vol_ul", "yolk_concentration_mg_ul", "yolk_concentration_mg_ml", "dilution_factor", "adjusted_yolk_con_mg_ml", "final_CORT_pg_mg", "Assay_comments_CORT")]
+
+
+th <- data[c("Date", "Time", "Observer", "Species", "SampleID", "EggID", "ClutchID", "Enclosure", "Length_mm", "Width_mm", "Egg_mass_mg", "Yolk_mass_mg", "Dissection_Comments", "Plate_TH", "CV_TH", "raw_TH_ng_ml", "resuspend_vol_ul_TH", "yolk_concentration_mg_ul_TH", "yolk_concentration_mg_ml_TH", "dilution_factor_TH", "adjusted_yolk_con_mg_ml_TH", "final_TH_ng_mg", "final_TH_pg_mg", "Assay_comments_TH")]
+
+# gives the number of eggs on different plates
+eggs_by_plate_CORT <- cort %>% group_by(ClutchID) %>% summarise(eggs = n(), plates = length(unique(Plate_CORT, na.rm =TRUE)))
+
+eggs_by_plate_TH <- th %>% group_by(ClutchID) %>% summarise(eggs = n(), plates = length(unique(Plate_TH, na.rm =TRUE)))
+
+```
+
+```{r, analysis}
+#| label: analysis
+#| echo: false
+#| cache: true
+#| include: false
+
+# Estimate the proportion of between vs within clutch variation in CORT for delicata and guichenoti.
+    ## deli - using plate variation as fixed effect
+    mod_CORT_deli <- rpt(log(final_CORT_pg_mg) ~ Plate_CORT + (1|ClutchID), grname = c( "ClutchID", "Residual"), datatype = "Gaussian", data = deli)
+plot(mod_CORT_deli)
+
+      ### how much variation due to plate
+     mod_CORT_deli_plate <- rpt(log(final_CORT_pg_mg) ~ (1|ClutchID) + (1|Plate_CORT), grname = c( "ClutchID", "Plate_CORT"), datatype = "Gaussian", data = deli)
+
+     ### working out how much total variation for deli CORT
+    summary(lmer(log(final_CORT_pg_mg) ~1  + (1|ClutchID) + (1|Plate_CORT),  data = deli)) # more accurate 
+    sd(log(deli$final_CORT_pg_mg))^2 # estimation
+
+  ## guich - using plate variation as fixed effect
+  mod_CORT_guich <- rpt(log(final_CORT_pg_mg) ~ Plate_CORT + (1|ClutchID), grname = c( "ClutchID", "Residual"), datatype = "Gaussian", data = guich)
+  
+    ### - how much variation due to plate
+    mod_CORT_guich_plate <- rpt(log(final_CORT_pg_mg) ~ (1|ClutchID) + (1|Plate_CORT), grname = c( "ClutchID", "Plate_CORT"), datatype = "Gaussian", data = guich)
+  
+  
+  
+
+# Estimate the proportion of betweeh vs within clutch variation in TH for delicata and guichenoti
+  ## deli - using plate variation as fixed effect
+  mod_TH_deli <- rpt(log(final_TH_pg_mg) ~ Plate_TH + (1|ClutchID), grname = c( "ClutchID", "Residual"), datatype = "Gaussian", data = deli)
+    
+   ### how much variation due to plate
+    mod_TH_deli_plate <- rpt(log(final_TH_pg_mg) ~ (1|ClutchID) + (1|Plate_TH), grname = c( "ClutchID", "Plate_TH"), datatype = "Gaussian", data = deli)
+    
+  ## guich - using plate variation as fixed effect
+  mod_TH_guich <- rpt(log(final_TH_pg_mg) ~ Plate_TH + (1|ClutchID), grname = c( "ClutchID", "Residual"), datatype = "Gaussian", data = guich)
+  
+    ### - how much variation due to plate
+   mod_TH_guich_plate <- rpt(log(final_TH_pg_mg) ~ (1|ClutchID) + (1|Plate_TH), grname = c( "ClutchID", "Plate_TH"), datatype = "Gaussian", data = guich)
+
+
+   # SPECIES COMPARISONS:
+   
+   # Have a look at the model results. Here, we'll control for egg mass (just in case) and look at the differences between species in CORT concentration
+   ## NOT accounting for egg mass
+  model_CORT1 <- lmer(log(final_CORT_pg_mg) ~ 1 + (1|ClutchID) + (1|Plate_CORT), 
+                      data = data)
+  summary(model_CORT1)
+  
+  ## accounting for egg mass
+  
+  model_CORT2 <- lmer(log(final_CORT_pg_mg) ~ scale(Egg_mass_mg) + Species + (1|ClutchID) + (1|Plate_CORT), data = data)
+  summary(model_CORT2)
+  
+  ## Testing above model (model_CORT1)  also controlling for plate variation to see differences between species in CORT
+  
+  model_CORT_plate <- lmer(log(final_CORT_pg_mg) ~ scale(Egg_mass_mg) + Species + (1|ClutchID)+ (1|Plate_CORT), data = data)
+  
+  
+  
+# Controlling for egg mass to look at differences between species in T4 concentration
+  
+  model_TH <- lmer(log(final_TH_pg_mg) ~ scale(Egg_mass_mg) + Species + (1|ClutchID) + (1|Plate_TH), data = data)
+  
+
+  # Check model assumptions
+    hist(residuals(model_CORT2))
+    hist(residuals(model_CORT2))
+
+  # Extract what we need from the model_CORT
+   coefs <- summary(model_CORT2)$coefficients
+      ci <- confint(model_CORT2) # 95% confidence interval
+      
+    # extracting from model_CORT_plate
+      coef_plate <- summary(model_CORT_plate)$coefficients
+      
+  # Extract items from model_TH
+      coefs_TH <- summary(model_TH)$coefficients
+      ci_TH <- confint(model_TH)
+ summary(model_TH)$ varcor # for the residuals
+ 
+ 
+ # extracting plate variation for evidence
+    ## CORT
+ plate_var_CORT <- summary(mod_CORT_deli_plate)$R$Plate_CORT
+ 
+ ci_deli_CORT_plate <- summary(mod_CORT_deli_plate)$CI_emp # 95% CI
+ 
+  ci_guich_CORT_plate <- summary(mod_CORT_guich_plate)$CI_emp
+ 
+    ## TH
+ ci_deli_TH_plate <- summary(mod_TH_deli_plate)$CI_emp
+ 
+ ci_guich_TH_plate <- summary(mod_TH_guich_plate)$CI_emp
+ 
+ 
+ # CORT and T4 relationship
+ 
+ hormone_rel <- lm(log(final_CORT_pg_mg) ~ log(final_TH_pg_mg), data = data)
+summary_hormone_rel <- summary(hormone_rel)
+  
+```
+
+
+# Methods
+
+## Egg collection and dissection
+
+I collected clutches of *L. delicata* and *L. guichenoti* from respective lizard enclosure egg boxes on Monday and Wednesday each week for 9 weeks over November 2022 to February 2023. I collected a total of `r CORT_sum[1,7]` clutches each for *L. delicata* and *L. guichenoti*, equating to `r (egg_num[1,2]+egg_num[2,2])-3` eggs (`r egg_num[1,2]` for *L. delicata* and `r (egg_num[2,2]-3)` for *L. guichenoti*).
+
+
+
+
+During extraction, `r ((egg_num[1,2]+egg_num[2,2])-3) - ((egg_num_adj[1,2]+egg_num_adj[2,2])-3)` eggs were lost due to not running in the silica-bonded column (`r egg_num[1,2]-egg_num_adj[1,2]` for *L. delicata* and `r egg_num[2,2]-egg_num_adj[2,2]` for *L. guichenoti*).
+
+
+`r CORT_sum_adj[1,7]` clutches were tested for CORT for each species, and `r TH_sum_adj[1,7]` clutches for T4 for each species, as I decided to measure T4 concentration after previously assaying `r CORT_sum_adj[1,7] - TH_sum_adj[1,7] ` clutches.
+
+
+## Statistical analyses
+
+I performed all statistical analyses in R studio using R version 4.2.2. Upon initial analysis, `r ((mod_CORT_deli_plate$R[1,2]+mod_CORT_guich_plate$R$Plate_CORT)/2)*100`% of total variation in CORT and `r ((mod_TH_deli_plate$R[1,2]+mod_TH_guich_plate$R$Plate_TH)/2)*100`% of total variation in T4 was due to differences between EIA plates, confounding clutch variation determination. As this variation is not biologically relevant, I used a conditional repeatability approach, and included EIA plate variation as a fixed factor in the repeatability models. Between and within clutch variation is calculated from variation excluding plate variation.
+
+
+
+### Between clutch variation
+I estimated between clutch variation for CORT and T4 for each of *L. delicata* and *L. guichenoti* by estimating between plate ($\sigma_{p}^2$), between clutch ($\sigma_{c}^2$) and within clutch ($\sigma_{w}^2$) variance parameters. I then calculated between clutch *ICC* ($R_{c}$) using the following formula with the rptR package in R as described by Nakagawa and Schielzeth (2010):
+
+$$
+R_{c} = \frac{\sigma_{c}^2}{\sigma_{c}^2 + \sigma_{w}^2}
+$$
+Plate variance was included as a fixed effect in the model.
+
+where $\sigma_{c}^2$ is the between clutch variance estimate and $\sigma_{w}^2$ is the within-clutch variance estimate. 
+
+### Within clutch variation
+
+Between plate ($\sigma_{p}^2$), between clutch ($\sigma_{c}^2$) and within clutch ($\sigma_{w}^2$) variance parameters estimates from between clutch variation from CORT/T4 and *L. delicata*/*L. guichenoti* were used to calculate within clutch *ICC* ($R_{w}$) using the following formula with the rptR package in R as described by Nakagawa and Schielzeth (2010):
+
+$$
+R_{w} = \frac{\sigma_{w}^2}{\sigma_{c}^2 + \sigma_{w}^2}
+$$
+Plate variance was included as a fixed effect in the model.
+
+
+### Species comparison
+
+*L. delicata* and *L. guichenoti* concentrations of CORT and T4 were compared using a linear model, accounting for egg mass as a fixed effect.
+
+
+### CORT and T4 relationship
+
+A linear regression was used to compare CORT and T4 concentrations for each egg. A linear model was used to determine scaling coefficient and significance.
+
+
+# Results
+
+
+## *Lampropholis delicata*
+I obtained an average of `r eggs_per_clutch_sum[1,"mean"]` eggs per clutch (`r egg_clutch[1,3]` clutches in total) for *L. delicata* (SD = `r eggs_per_clutch_sum[1,"sd"]`) with a minimum of `r eggs_per_clutch_sum[1,"min"]` and maximum of `r eggs_per_clutch_sum[1,"max"]` eggs for each clutch. The average log CORT concentration was `r CORT_sum[1,2]` (SD = `r CORT_sum[1,3]`) with a minimum of `r CORT_sum[1,4]` and maximum of `r CORT_sum[1,5]` (Table 1). Overall, there was evidence of differences between clutch repeatability in CORT concentrations (R = `r mod_CORT_deli$R$ClutchID`, 95% CI: `r mod_CORT_deli$CI_emp[1,1]` to `r mod_CORT_deli$CI_emp[1,2]`; @fig-fig1), suggesting approximately `r mod_CORT_deli$R$ClutchID*100`% of the variation was the result of differences between mothers. Additionally, there was evidence of repeatability difference within clutches in CORT concentrations (R = `r mod_CORT_deli$R$Residual`, 95% CI: `r mod_CORT_deli$CI_emp[2,1]` to `r mod_CORT_deli$CI_emp[2,2]`; @fig-fig1), suggesting approximately `r mod_CORT_deli$R$Residual*100`% of the variation was due to egg hormone deposition differences in respective clutches.
+
+
+
+The average log T4 concentration for *L. delicata* was `r TH_sum[1,2]` (SD = `r TH_sum[1,3]`) with a minimum of `r TH_sum[1,4]` and maximum of `r TH_sum[1,5]` (Table 2). For T4 concentration, there was no strong evidence for between clutch repeatability difference (R = `r mod_TH_deli$R$ClutchID`, 95% CI: `r mod_TH_deli$CI_emp[1,1]` to `r mod_TH_deli$CI_emp[1,2]`); @fig-fig2). This suggests approximately `r mod_TH_deli$R$ClutchID*100`% of T4 variation was due to differences between mothers. Additionally, there was evidence of repeatability difference within clutches in T4 concentrations (R = `r mod_TH_deli$R$Residual`, 95% CI: `r mod_TH_deli$CI_emp[2,1]` to `r mod_TH_deli$CI_emp[2,2]`; @fig-fig2), suggesting approximately `r mod_TH_deli$R$Residual*100`% of the variation was due to egg hormone deposition differences in respective clutches.
+
+
+
+## *Lampropholis guichenoti*
+
+I obtained an average of `r eggs_per_clutch_sum[2,"mean"]` eggs per clutch (`r egg_clutch[2,3]` clutches in total) for *L. guichenoti* (SD = `r eggs_per_clutch_sum[2,"sd"]`) with a minimum of `r eggs_per_clutch_sum[2,"min"]` and maximum of `r eggs_per_clutch_sum[2,"max"]` eggs for each clutch. The average log CORT concentration was `r CORT_sum[2,2]` (SD = `r CORT_sum[2,3]`) with a minimum of `r CORT_sum[2,4]` and maximum of `r CORT_sum[2,5]` (Table 1). Overall, there was evidence of between clutch repeatability differences in CORT concentrations (R = `r mod_CORT_guich$R$ClutchID`, 95% CI: `r mod_CORT_guich$CI_emp[1,1]` to `r mod_CORT_guich$CI_emp[1,2]`; @fig-fig1), suggesting approximately `r mod_CORT_guich$R$ClutchID*100`% of the variation was the result of differences between mothers. Additionally, there was evidence of repeatability difference within clutches in CORT concentrations (R = `r mod_CORT_guich$R$Residual`, 95% CI: `r mod_CORT_guich$CI_emp[2,1]` to `r mod_CORT_guich$CI_emp[2,2]`; @fig-fig1), suggesting approximately `r mod_CORT_guich$R$Residual*100`% of the variation was due to egg hormone deposition differences in respective clutches.
+
+
+The average log T4 concentration for *L. guichenoti* was `r TH_sum[2,2]` (SD = `r TH_sum[2,3]`) with a minimum of `r TH_sum[2,4]` and maximum of `r TH_sum[2,5]` (Table 2). For T4 concentration, there was no strong evidence for differences between clutch repeatability (R = `r mod_TH_guich$R$ClutchID`, 95% CI: `r mod_TH_guich$CI_emp[1,1]` to `r mod_TH_guich$CI_emp[1,2]`); @fig-fig2). This suggests approximately `r mod_TH_guich$R$ClutchID*100`% of T4 variation was due to differences between mothers. Additionally, there was evidence of repeatability differences within clutches in T4 concentrations (R = `r mod_TH_guich$R$Residual`, 95% CI: `r mod_TH_guich$CI_emp[2,1]` to `r mod_TH_guich$CI_emp[2,2]`; @fig-fig2), suggesting approximately `r mod_TH_guich$R$Residual*100`% of the variation was due to egg hormone deposition differences in respective clutches.
+
+
+
+## Species comparisons
+
+*L. delicata* had higher CORT concentrations, however there were no significant differences in CORT concentrations between species (mean difference = `r coefs[3,1]`, 95% CI: `r ci[5,1]` to `r ci[5,2]`, p = `r coefs[3,5]`) controlling for egg mass. *L. delicata* had higher T4 concentrations accounting for egg mass, however this difference in T4 concentration between species was not significant (mean difference = `r coefs_TH[3,1]`, 95% CI: `r ci_TH[5,1]` to `r ci_TH[5,2]`, p = `r coefs_TH[3,5]`).
+
+
+
+## CORT and T4 relationship
+
+There was no significant relationship of CORT and T4 (scaling coefficient = `r summary_hormone_rel$coefficient[2,1]`, SE = `r summary_hormone_rel$coefficient[2,2]`, p = `r summary_hormone_rel$coefficient[2,4]`; @fig-fig3), suggesting no correlation of these hormones.
+
+
+
+
+```{r, fig-fig1}
+#| label: fig-fig1
+#| fig-cap: Log CORT concentration (pg/mg yolk) in egg yolks for clutches of *L. delicata* (n = 21) and *L. guichenoti* (n = 21). Each box represents a unique clutch, where *L. delicata* clutches are shown in shades of warmer colours, and *L. guichenoti* clutches are shown in shades of cooler colours.
+#| echo: false
+
+# boxplot
+
+# Define the color palettes
+
+warm_colors <- c(brewer.pal(7, "Reds"), brewer.pal(7, "Oranges"), brewer.pal(4, "YlOrRd"), brewer.pal(3, "YlOrBr"))
+
+cool_colors <- c(brewer.pal(7, "PuBu"), brewer.pal(7, "Blues"), brewer.pal(7, "BuPu") )
+
+
+data <- data %>% mutate(log_final_CORT_pg_mg = log(final_CORT_pg_mg))
+
+fig1 <- ggplot(data = data, mapping = aes(x = Species, y = log_final_CORT_pg_mg, fill = factor(interaction(ClutchID, Species))))  + labs(x="Species",y="log [CORT] (pg/mg yolk)", fill = "Clutch") +
+                                                                                                                                          #, color = "Species") +
+   scale_fill_manual(values = c(warm_colors, cool_colors), name = "Clutch", labels=c("CL405", "CL427", "CL440", "CL461", "CL478", "CL500", "CL503", "CL508", "CL510", "CL524", "CL614", "CL616", "CL626", "CL627", "CL655", "CL656", "CL681", "CL691", "CL699", "CL700", "CL701", "CL404", "CL422", "CL434", "CL456", "CL476", "CL494", "CL506", "CL511", "CL515", "CL613", "CL615", "CL639", "CL644", "CL645", "CL653", "CL654", "CL682", "CL690", "CL693", "CL694", "CL696")) + # guide = "none" removes legend
+theme(axis.title.y=element_text(face="italic")) + 
+  geom_boxplot(aes()) + theme_classic() + scale_x_discrete(labels=c((expression(paste(italic("Lampropholis delicata")))), (expression(paste(italic("Lampropholis guichenoti"))))  )) +
+ # ggtitle(expression(paste("log [CORT] for ", italic("L. delicata "), "and ", italic("L. guichenoti")))) +
+  theme(axis.text.x = element_text(size = 20)) + # x axis labels (deli and guich)
+  theme(axis.text.y = element_text(size = 15)) + # y axis labels (the log numbers)
+  theme(plot.title = element_text(size = 40)) + # plot title 
+  theme(axis.title.x = element_text(size = 20)) + # x axis title
+  theme(axis.title.y = element_text(size = 20)) + # y axis title
+  theme(legend.title = element_text(size = 20)) + # legend title
+  theme(legend.text = element_text(size = 12)) # legend names
+
+
+
+# to save figure as image
+ggsave(filename = "Figure_1.png", plot=fig1, width = 12, height = 6, bg = NULL)
+image_read("Figure_1.png")
+```
+
+
+```{r, fig-fig2}
+#| label: fig-fig2
+#| fig-cap: Log T4 concentration (pg/mg yolk) in egg yolks for clutches of *L. delicata* (n = 16) and *L. guichenoti* (n = 16). Each box represents a unique clutch, where *L. delicata* clutches are shown in shades of pink, and *L. guichenoti* clutches are shown in shades of green.
+#| echo: false
+
+warm_colors <- c(brewer.pal(8, "RdPu"), brewer.pal(8, "PuRd") ) #, brewer.pal(2, "Reds"))
+
+cool_colors <- c(brewer.pal(7, "BuGn"), brewer.pal(7, "Greens"), brewer.pal(7, "GnBu") )
+
+
+data <- data %>% mutate(log_final_TH_pg_mg = log(final_TH_pg_mg))
+
+fig2 <- ggplot(data = data, mapping = aes(x = Species, y = log_final_TH_pg_mg, fill = factor(interaction(ClutchID, Species))))  + labs(x="Species",y="log [T4] (pg/mg yolk)", fill = "Clutch") + 
+  scale_fill_manual(values = c(warm_colors, cool_colors), name = "Clutch", labels=c("CL500", "CL503", "CL508", "CL510", "CL524", "CL614", "CL616", "CL626", "CL627", "CL655", "CL656", "CL681", "CL691", "CL699", "CL700", "CL701", "CL494", "CL506", "CL511", "CL515", "CL613", "CL615", "CL639", "CL644", "CL645", "CL653", "CL654", "CL682", "CL690", "CL693", "CL694", "CL696") ) + # guide = "none" removes legend 
+  #scale_fill_discrete(name = "Clutch") +
+theme(axis.title.y=element_text(face="italic")) + geom_boxplot(aes()) + theme_classic() + scale_x_discrete(labels=c((expression(paste(italic("Lampropholis delicata")))), (expression(paste(italic("Lampropholis guichenoti"))))  )) +
+  #  ggtitle(expression(paste("log [TH] for ", italic("L. delicata "), "and ", italic("L. guichenoti")))) +
+  theme(axis.text.x = element_text(size = 20)) + # x axis labels (deli and guich)
+  theme(axis.text.y = element_text(size = 15)) + # y axis labels (the log numbers)
+ # theme(plot.title = element_text(size = 35)) + # plot title 
+  theme(axis.title.x = element_text(size = 20)) + # x axis title
+  theme(axis.title.y = element_text(size = 20)) + # y axis title
+  theme(legend.title = element_text(size = 20)) + # legend title
+  theme(legend.text = element_text(size = 12)) # legend names
+
+ggsave(filename = "Figure_2.png", plot = fig2, width = 12.622, height = 6.75)
+image_read("Figure_2.png")
+```
+
+
+```{r, fig-fig3}
+#| label: fig-fig3
+#| fig-cap: Relationship of log CORT concentration (pg/mg yolk) and log T4 concentration (pg/mg yolk) in egg yolks. Raw data is shown in black (n = 96), the linear regression line is represented in purple, and 95% confidence interval is shaded in grey. The scaling coefficient is 0.06 with a p-value of 0.77.
+#| echo: false
+
+
+# T4 and CORT interaction
+fig3 <- ggplot(data, aes(x = log(final_CORT_pg_mg), y = log(final_TH_pg_mg))) + 
+  geom_point() + stat_smooth(method="lm", colour = "purple") + theme_classic() +
+  labs(x = "log [CORT] (pg/mg yolk)", y = "log [T4] (pg/mg yolk)") +
+    theme(axis.text.x = element_text(size = 15)) + # x axis labels (log numbers)
+  theme(axis.text.y = element_text(size = 15)) + # y axis labels (the log numbers)
+ # theme(plot.title = element_text(size = 35)) + # plot title 
+  theme(axis.title.x = element_text(size = 20)) + # x axis title
+  theme(axis.title.y = element_text(size = 20)) # y axis title
+
+ggsave(filename = "Figure_3.png", plot = fig3, width = 9, height = 6.75)
+image_read("Figure_3.png")
+
+```
